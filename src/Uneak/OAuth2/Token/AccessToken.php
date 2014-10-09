@@ -17,6 +17,15 @@ class AccessToken extends Token {
 		$this->grant_type = $grant_type;
 	}
 
+	public function eraseToken() {
+		$this->setToken(null);
+		$this->setTokenType(self::ACCESS_TOKEN_URI);
+		$this->setScope(null);
+		$this->setRefreshToken(null);
+		$this->expires_in = null;
+		$this->create_at = time();
+	}
+	
 	public function parseToken($result) {
 		$this->setToken($result['access_token']);
 		$this->setTokenType($result['token_type']);
@@ -26,13 +35,13 @@ class AccessToken extends Token {
 		$this->create_at = time();
 	}
 
-	public function requestToken(GrantTypeInterface $grant_type = null, $extra_parameters = array()) {
+	private function requestToken(GrantTypeInterface $grant_type = null, $extra_parameters = array()) {
 		if (!$grant_type) {
 			$grant_type = $this->grant_type;
 		}
 		$grantRequestParam = $grant_type->getRequestParams();
 		$request = new CurlRequest();
-		$request_token = $request
+		return $request
 				->setUrl($grant_type->getApplication()->getTokenEndpoint())
 				->setParameters($grantRequestParam['parameters'])
 				->setHttpHeaders($grantRequestParam['http_headers'])
@@ -42,23 +51,32 @@ class AccessToken extends Token {
 				->setFormContentType(CurlRequest::HTTP_FORM_CONTENT_TYPE_APPLICATION)
 				->getResponse()
 		;
-		$result = $request_token->getResult();
-		if ($request_token->getCode() == 200) {
-			$this->parseToken($result);
-		} else if ($request_token->getCode() == 400) {
-			throw new Exception('"access_token" error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
-		} else {
-			throw new Exception('"access_token" ' . $request_token->getCode() . ' : TEST : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
-		}
 	}
 
 	protected function updateToken() {
 		if (!$this->token) {
-			$this->requestToken($this->grant_type);
+			$request_token = $this->requestToken($this->grant_type);
 		} else if ($this->isExpired()) {
 			$refreshTokenGrant = new RefreshToken($this->grant_type->getApplication());
 			$refreshTokenGrant->setRefreshToken($this->getRefreshToken());
-			$this->requestToken($refreshTokenGrant);
+			$request_token = $this->requestToken($refreshTokenGrant);
+		}
+		
+		$code = $request_token->getCode();
+		$result = $request_token->getResult();
+		
+		if ($code == 200) {
+			$this->parseToken($result);
+			
+		} else if ($request_token->getCode() == 400) {
+			$this->eraseToken();
+			if ($result['error_description'] == "Refresh token has expired") {
+				$this->updateToken();
+				return;
+			}
+			throw new Exception('"access_token" error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+		} else {
+			throw new Exception('"access_token" ' . $request_token->getCode() . ' : TEST : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 		}
 	}
 
