@@ -17,6 +17,10 @@ class AccessToken extends Token {
 		$this->grant_type = $grant_type;
 	}
 
+	public function getAccessToken() {
+		return ($this->hasExpired()) ? null : $this->token;
+	}
+	
 	public function eraseToken() {
 		$this->setToken(null);
 		$this->setTokenType(self::ACCESS_TOKEN_URI);
@@ -56,10 +60,14 @@ class AccessToken extends Token {
 	protected function updateToken() {
 		if (!$this->token) {
 			$request_token = $this->requestToken($this->grant_type);
-		} else if ($this->isExpired()) {
+		} else if ($this->hasExpired()) {
 			$refreshTokenGrant = new RefreshToken($this->grant_type->getApplication());
 			$refreshTokenGrant->setRefreshToken($this->getRefreshToken());
 			$request_token = $this->requestToken($refreshTokenGrant);
+			$this->eraseToken();
+		} else {
+			// have valid token
+			return;
 		}
 		
 		$code = $request_token->getCode();
@@ -70,13 +78,21 @@ class AccessToken extends Token {
 			
 		} else if ($request_token->getCode() == 400) {
 			$this->eraseToken();
-			if ($result['error_description'] == "Refresh token has expired") {
-				$this->updateToken();
-				return;
+			switch ($result) {
+				case "Refresh token has expired":
+					$this->updateToken();
+					break;
+				case "Code doesn't exist or is invalid for the client":
+					throw new Exception('Access Token Error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					// TODO REFRESH THE TOKEN
+					break;
+
+				default:
+					throw new Exception('Access Token Error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
 			}
-			throw new Exception('"access_token" error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 		} else {
-			throw new Exception('"access_token" ' . $request_token->getCode() . ' : TEST : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+			throw new Exception('Access Token Error : [' . $code . '] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 		}
 	}
 

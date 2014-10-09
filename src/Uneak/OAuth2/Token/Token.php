@@ -32,7 +32,7 @@ class Token {
 		return $this;
 	}
 
-	public function isExpired() {
+	public function hasExpired() {
 		return ($this->getExpiresIn() < 60); // indique qu'il est expiré une minute avant le vrai moment
 	}
 
