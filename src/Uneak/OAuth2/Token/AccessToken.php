@@ -57,7 +57,7 @@ class AccessToken extends Token {
 		;
 	}
 
-	protected function updateToken() {
+	public function updateToken() {
 		if (!$this->token) {
 			$request_token = $this->requestToken($this->grant_type);
 		} else if ($this->hasExpired()) {
