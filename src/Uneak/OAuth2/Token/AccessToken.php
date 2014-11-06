@@ -17,6 +17,19 @@ class AccessToken extends Token {
 		$this->grant_type = $grant_type;
 	}
 
+	public function getAccessToken() {
+		return ($this->hasExpired()) ? null : $this->token;
+	}
+	
+	public function eraseToken() {
+		$this->setToken(null);
+		$this->setTokenType(self::ACCESS_TOKEN_URI);
+		$this->setScope(null);
+		$this->setRefreshToken(null);
+		$this->expires_in = null;
+		$this->create_at = time();
+	}
+	
 	public function parseToken($result) {
 		$this->setToken($result['access_token']);
 		$this->setTokenType($result['token_type']);
@@ -26,13 +39,14 @@ class AccessToken extends Token {
 		$this->create_at = time();
 	}
 
-	public function requestToken(GrantTypeInterface $grant_type = null, $extra_parameters = array()) {
+	private function requestToken(GrantTypeInterface $grant_type = null, $extra_parameters = array()) {
 		if (!$grant_type) {
 			$grant_type = $this->grant_type;
 		}
 		$grantRequestParam = $grant_type->getRequestParams();
+		
 		$request = new CurlRequest();
-		$request_token = $request
+		return $request
 				->setUrl($grant_type->getApplication()->getTokenEndpoint())
 				->setParameters($grantRequestParam['parameters'])
 				->setHttpHeaders($grantRequestParam['http_headers'])
@@ -42,23 +56,59 @@ class AccessToken extends Token {
 				->setFormContentType(CurlRequest::HTTP_FORM_CONTENT_TYPE_APPLICATION)
 				->getResponse()
 		;
-		$result = $request_token->getResult();
-		if ($request_token->getCode() == 200) {
-			$this->parseToken($result);
-		} else if ($request_token->getCode() == 400) {
-			throw new Exception('"access_token" error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
-		} else {
-			throw new Exception('"access_token" ' . $request_token->getCode() . ' : TEST : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
-		}
 	}
 
-	protected function updateToken() {
+	public function updateToken() {
 		if (!$this->token) {
-			$this->requestToken($this->grant_type);
-		} else if ($this->isExpired()) {
+			$request_token = $this->requestToken();
+			
+		} else if ($this->hasExpired()) {
 			$refreshTokenGrant = new RefreshToken($this->grant_type->getApplication());
 			$refreshTokenGrant->setRefreshToken($this->getRefreshToken());
-			$this->requestToken($refreshTokenGrant);
+			$request_token = $this->requestToken($refreshTokenGrant);
+			$this->eraseToken();
+		} else {
+			// have valid token
+			return;
+		}
+		
+		
+		$code = $request_token->getCode();
+		$result = $request_token->getResult();
+		
+		if ($code == 200) {
+			$this->parseToken($result);
+			
+		} else if ($request_token->getCode() == 400) {
+			$this->eraseToken();
+			switch ($result['error_description']) {
+				case "Refresh token has expired":
+					$this->updateToken();
+					break;
+				case "Code doesn't exist or is invalid for the client":
+				case "The authorization code has expired":
+				default:
+					throw new Exception('Access Token [400:invalid_request] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
+			}
+			throw new Exception('Access Token Error : [400:invalid_request] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+		} else  if ($request_token->getCode() == 401) {
+			$this->eraseToken();
+			switch ($result['error_description']) {
+				default:
+					throw new Exception('Access Token [401:invalid_token] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
+			}
+			throw new Exception('Access Token Error : [401:invalid_token] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+			
+		} else  if ($request_token->getCode() == 403) {
+			$this->eraseToken();
+			switch ($result['error_description']) {
+				default:
+					throw new Exception('Access Token [403:insufficient_scope] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
+			}
+			throw new Exception('Access Token Error : [403:insufficient_scope] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 		}
 	}
 
