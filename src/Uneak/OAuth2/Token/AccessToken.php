@@ -44,6 +44,7 @@ class AccessToken extends Token {
 			$grant_type = $this->grant_type;
 		}
 		$grantRequestParam = $grant_type->getRequestParams();
+		
 		$request = new CurlRequest();
 		return $request
 				->setUrl($grant_type->getApplication()->getTokenEndpoint())
@@ -59,7 +60,8 @@ class AccessToken extends Token {
 
 	public function updateToken() {
 		if (!$this->token) {
-			$request_token = $this->requestToken($this->grant_type);
+			$request_token = $this->requestToken();
+			
 		} else if ($this->hasExpired()) {
 			$refreshTokenGrant = new RefreshToken($this->grant_type->getApplication());
 			$refreshTokenGrant->setRefreshToken($this->getRefreshToken());
@@ -70,6 +72,7 @@ class AccessToken extends Token {
 			return;
 		}
 		
+		
 		$code = $request_token->getCode();
 		$result = $request_token->getResult();
 		
@@ -78,21 +81,34 @@ class AccessToken extends Token {
 			
 		} else if ($request_token->getCode() == 400) {
 			$this->eraseToken();
-			switch ($result) {
+			switch ($result['error_description']) {
 				case "Refresh token has expired":
 					$this->updateToken();
 					break;
 				case "Code doesn't exist or is invalid for the client":
-					throw new Exception('Access Token Error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
-					// TODO REFRESH THE TOKEN
-					break;
-
+				case "The authorization code has expired":
 				default:
-					throw new Exception('Access Token Error : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					throw new Exception('Access Token [400:invalid_request] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 					break;
 			}
-		} else {
-			throw new Exception('Access Token Error : [' . $code . '] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+			throw new Exception('Access Token Error : [400:invalid_request] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+		} else  if ($request_token->getCode() == 401) {
+			$this->eraseToken();
+			switch ($result['error_description']) {
+				default:
+					throw new Exception('Access Token [401:invalid_token] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
+			}
+			throw new Exception('Access Token Error : [401:invalid_token] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+			
+		} else  if ($request_token->getCode() == 403) {
+			$this->eraseToken();
+			switch ($result['error_description']) {
+				default:
+					throw new Exception('Access Token [403:insufficient_scope] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
+					break;
+			}
+			throw new Exception('Access Token Error : [403:insufficient_scope] : ' . $result['error_description'], Exception::REQUEST_ACCESS_TOKEN_ERROR);
 		}
 	}
 
